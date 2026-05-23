@@ -1,0 +1,15 @@
+{
+  "name": "manual_annotation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "^6.0.7",
+    "vite": "^8.0.14",
+    "vue": "^3.5.34"
+  }
+}

@@ -23,7 +23,7 @@ html,
 body {
   margin: 0;
   width: 100%;
-  height: 100%;
+  min-height: 100%;
   font-family:
     Inter,
     "Noto Sans SC",
@@ -31,7 +31,8 @@ body {
     sans-serif;
   background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
   color: var(--text-strong);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 button,
@@ -45,12 +46,12 @@ button {
 }
 
 .workspace-shell {
-  height: 100vh;
+  min-height: 100vh;
   padding: 18px;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto;
   gap: 18px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .topbar,
@@ -145,13 +146,15 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  min-width: 196px;
+  padding: 10px 16px;
   border-radius: 999px;
   background: #ecfeff;
   border: 1px solid #a5f3fc;
   color: #0f766e;
   font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .status-badge__dot {
@@ -321,6 +324,12 @@ button {
   overflow: hidden;
 }
 
+.asset-card__thumb-image {
+  width: 92px;
+  object-fit: cover;
+  background: #e2e8f0;
+}
+
 .asset-card__thumb-shell,
 .asset-card__thumb-box,
 .asset-card__thumb-base {
@@ -404,6 +413,17 @@ button {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+.annotation-panel--empty {
+  display: grid;
+  place-items: center;
+}
+
+.annotation-panel__empty {
+  color: var(--text-body);
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .annotation-panel__header {
   display: flex;
   justify-content: space-between;
@@ -418,6 +438,52 @@ button {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.interaction-toggle {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 14px;
+  background: #edf3f9;
+  border: 1px solid #d7e0ea;
+}
+
+.interaction-toggle__button {
+  width: 40px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-muted);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.interaction-toggle__button:hover {
+  transform: translateY(-1px);
+  color: var(--text-strong);
+}
+
+.interaction-toggle__button.active {
+  background: var(--panel-solid);
+  border: 1px solid #bfd0e3;
+  color: var(--text-strong);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+.interaction-toggle__svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .metric-pill {
@@ -451,13 +517,14 @@ button {
 
 .main-view {
   position: relative;
-  min-height: 0;
+  min-height: 560px;
   margin: 16px;
   border-radius: 22px;
   border: 1px solid #334155;
   overflow: hidden;
   background: linear-gradient(180deg, #0f172a 0%, #1e293b 55%, #111827 100%);
   box-shadow: var(--shadow-deep);
+  aspect-ratio: 2.55 / 1;
 }
 
 .main-view::before {
@@ -466,6 +533,32 @@ button {
   inset: 0 0 auto;
   height: 96px;
   background: linear-gradient(180deg, rgba(2, 6, 23, 0.8) 0%, rgba(2, 6, 23, 0) 100%);
+}
+
+.scene-viewport {
+  position: absolute;
+  inset: 0;
+}
+
+.scene-viewport canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.scene-viewport__loading {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid #334155;
+  background: rgba(11, 18, 32, 0.82);
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 700;
+  z-index: 2;
 }
 
 .main-view__overlay {
@@ -613,6 +706,10 @@ button {
   color: var(--text-strong);
 }
 
+.asset-inspector__row--stack {
+  display: grid;
+}
+
 .asset-inspector__actions {
   margin-top: 14px;
   display: grid;
@@ -674,10 +771,14 @@ button {
 }
 
 .ortho-card {
-  min-height: 162px;
+  min-height: 248px;
   border-radius: 20px;
   overflow: hidden;
   background: var(--panel-solid);
+}
+
+.ortho-card--tall {
+  position: relative;
 }
 
 .ortho-card__header {
@@ -694,9 +795,76 @@ button {
   color: #2563eb;
 }
 
-.ortho-card__svg {
-  height: 104px;
+.ortho-card__stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2.55 / 1;
+  min-height: 190px;
+}
+
+.ortho-card__viewport {
+  width: 100%;
+  height: 100%;
   background: #f8fafc;
+}
+
+.ortho-card__viewport canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.ortho-card__overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.ortho-cloud__point {
+  fill: rgba(148, 163, 184, 0.78);
+}
+
+.ortho-box__fill {
+  fill: rgba(56, 189, 248, 0.18);
+  stroke: transparent;
+  cursor: move;
+  pointer-events: auto;
+}
+
+.ortho-box__stroke {
+  fill: none;
+  stroke: #38bdf8;
+  stroke-width: 1.9;
+  vector-effect: non-scaling-stroke;
+}
+
+.ortho-box__rotation-link {
+  stroke: #c084fc;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.ortho-box__handle {
+  fill: #ffffff;
+  stroke: #0f172a;
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.ortho-box__handle--rotate {
+  fill: #f5d0fe;
+  stroke: #9333ea;
+}
+
+.ortho-box__handle--active {
+  fill: #38bdf8;
+  stroke: #e0f2fe;
 }
 
 @media (max-width: 1240px) {
@@ -731,7 +899,7 @@ button {
   }
 
   .main-view {
-    min-height: 520px;
+    min-height: 420px;
   }
 
   .asset-inspector {

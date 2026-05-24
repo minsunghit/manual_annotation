@@ -1,10 +1,33 @@
-<script setup>
-defineProps({
-  views: {
-    type: Array,
-    required: true,
-  },
-})
+<script setup lang="ts">
+import OrthographicBoxEditor from './OrthographicBoxEditor.vue'
+import type { Box3D, ProjectionView, Vec3 } from '../types/workspace'
+import type { LocalBounds } from '../utils/assetBoxTransform'
+
+const props = defineProps<{
+  box: Box3D | null
+  localBounds: LocalBounds | null
+  localPoints: Vec3[]
+  meshes: { layoutUrl: string; rawUrl: string } | null
+  selectedViews: string[]
+  orthoZoom: number
+}>()
+
+const emit = defineEmits<{
+  'update:box': [box: Box3D]
+  'update:ortho-zoom': [zoom: number]
+}>()
+
+const viewCards: Array<{ key: ProjectionView; title: string; subtitle: string }> = [
+  { key: 'top', title: 'Top', subtitle: 'Footprint, translation, and yaw on the x-z plane' },
+  { key: 'side', title: 'Side', subtitle: 'Edit z/y extent against the vertical plane' },
+  { key: 'front', title: 'Front', subtitle: 'Edit x/y extent against the vertical plane' },
+]
+
+function onWheel(event: WheelEvent) {
+  event.preventDefault()
+  const nextZoom = event.deltaY > 0 ? props.orthoZoom * 1.08 : props.orthoZoom / 1.08
+  emit('update:ortho-zoom', Math.min(Math.max(nextZoom, 0.35), 3.5))
+}
 </script>
 
 <template>
@@ -12,38 +35,31 @@ defineProps({
     <div class="orthographic-panel__header">
       <div>
         <h2>Orthographic Review</h2>
-        <p>Top / Side / Front consistency checks for room-aligned placement</p>
+        <p>Top / Side / Front projections share one Box3D state and update the 3D viewport in real time.</p>
       </div>
 
       <div class="legend-row">
-        <span class="legend-item"><i class="legend-dot legend-dot--room"></i>Room hull</span>
-        <span class="legend-item"><i class="legend-dot legend-dot--placed"></i>Placed asset</span>
-        <span class="legend-item"><i class="legend-dot legend-dot--candidate"></i>Candidate asset</span>
+        <span class="legend-item"><i class="legend-dot legend-dot--room"></i>Asset point cloud</span>
+        <span class="legend-item"><i class="legend-dot legend-dot--placed"></i>Editable box</span>
+        <span class="legend-item"><i class="legend-dot legend-dot--candidate"></i>Rotation handle</span>
       </div>
     </div>
 
-    <div class="ortho-grid">
-      <article v-for="view in views" :key="view.key" class="ortho-card">
-        <div class="ortho-card__header">
-          <div>
-            <h3>{{ view.title }}</h3>
-            <p>{{ view.subtitle }}</p>
-          </div>
-          <span class="aligned-pill">Aligned</span>
-        </div>
-
-        <svg class="ortho-card__svg" viewBox="0 0 392 108" preserveAspectRatio="none" aria-hidden="true">
-          <path :d="view.roomPath" class="line-ortho-room" />
-          <path
-            d="M116 52 L176 40 L214 56 L154 68 Z M116 52 L154 68 L154 86 L116 74 Z M154 68 L214 56 L214 82 L154 86 Z"
-            class="line-object line-object--primary"
-          />
-          <path
-            d="M238 60 L286 50 L318 60 L270 70 Z M238 60 L270 70 L270 88 L238 78 Z M270 70 L318 60 L318 84 L270 88 Z"
-            class="line-object line-object--secondary"
-          />
-        </svg>
-      </article>
+    <div class="ortho-grid" @wheel.prevent="onWheel">
+      <OrthographicBoxEditor
+        v-for="view in viewCards"
+        :key="view.key"
+        :box="box"
+        :local-bounds="localBounds"
+        :local-points="localPoints"
+        :meshes="meshes"
+        :selected-views="selectedViews"
+        :subtitle="view.subtitle"
+        :title="view.title"
+        :view="view.key"
+        :workspace-zoom="orthoZoom"
+        @update:box="emit('update:box', $event)"
+      />
     </div>
   </section>
 </template>

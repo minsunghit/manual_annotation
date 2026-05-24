@@ -1,20 +1,21 @@
-<script setup>
-defineProps({
-  sceneOptions: {
-    type: Array,
-    required: true,
-  },
-  selectedAssetName: {
-    type: String,
-    required: true,
-  },
-  selectedScene: {
-    type: String,
-    required: true,
-  },
-})
+<script setup lang="ts">
+import type { SceneOption } from '../types/workspace'
 
-const emit = defineEmits(['update:selectedScene'])
+defineProps<{
+  sceneOptions: SceneOption[]
+  savedLabel: string
+  selectedAssetName: string
+  selectedScene: string
+}>()
+
+const emit = defineEmits<{
+  'export-box': []
+  'update:selected-scene': [value: string]
+}>()
+
+function onSceneChange(event: Event) {
+  emit('update:selected-scene', (event.target as HTMLSelectElement).value)
+}
 </script>
 
 <template>
@@ -30,13 +31,9 @@ const emit = defineEmits(['update:selectedScene'])
 
       <label class="select-pill">
         <span class="select-pill__label">Scene</span>
-        <select
-          :value="selectedScene"
-          class="select-pill__control"
-          @change="emit('update:selectedScene', $event.target.value)"
-        >
-          <option v-for="scene in sceneOptions" :key="scene" :value="scene">
-            {{ scene }}
+        <select :value="selectedScene" class="select-pill__control" @change="onSceneChange">
+          <option v-for="scene in sceneOptions" :key="scene.value" :value="scene.value">
+            {{ scene.label }}
           </option>
         </select>
       </label>
@@ -50,10 +47,10 @@ const emit = defineEmits(['update:selectedScene'])
     <div class="topbar__right">
       <div class="status-badge">
         <span class="status-badge__dot"></span>
-        Auto-saved 18s ago
+        {{ savedLabel }}
       </div>
       <button class="action-btn action-btn--ghost" type="button">Save Draft</button>
-      <button class="action-btn action-btn--primary" type="button">Export JSON</button>
+      <button class="action-btn action-btn--primary" type="button" @click="emit('export-box')">Export JSON</button>
     </div>
   </header>
 </template>

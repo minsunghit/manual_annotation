@@ -1,2 +1,8 @@
 /.edge-profile
 /node_modules
+/scene
+/outputs
+/.git
+/external
+/dist
+*.log

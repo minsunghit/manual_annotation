@@ -13,8 +13,9 @@ defineProps({
 const emit = defineEmits(['select-asset'])
 
 function thumbStyle(asset) {
+  const accent = Array.isArray(asset.accent) && asset.accent.length >= 2 ? asset.accent : ['#334155', '#64748b']
   return {
-    background: `linear-gradient(135deg, ${asset.accent[0]}, ${asset.accent[1]})`,
+    background: `linear-gradient(135deg, ${accent[0]}, ${accent[1]})`,
   }
 }
 </script>
@@ -43,7 +44,13 @@ function thumbStyle(asset) {
         type="button"
         @click="emit('select-asset', asset.id)"
       >
-        <div class="asset-card__thumb" :style="thumbStyle(asset)">
+        <img
+          v-if="asset.previewUrl"
+          class="asset-card__thumb asset-card__thumb-image"
+          :src="asset.previewUrl"
+          :alt="asset.name"
+        />
+        <div v-else class="asset-card__thumb" :style="thumbStyle(asset)">
           <div class="asset-card__thumb-shell"></div>
           <div class="asset-card__thumb-box"></div>
           <div class="asset-card__thumb-base"></div>

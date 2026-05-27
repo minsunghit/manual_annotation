@@ -8,6 +8,7 @@ const props = defineProps<{
   localBounds: LocalBounds | null
   localPoints: Vec3[]
   meshes: { layoutUrl: string; rawUrl: string } | null
+  selectedAssetId: string
   selectedViews: string[]
   orthoZoom: number
 }>()
@@ -53,6 +54,7 @@ function onWheel(event: WheelEvent) {
         :local-bounds="localBounds"
         :local-points="localPoints"
         :meshes="meshes"
+        :selected-asset-id="selectedAssetId"
         :selected-views="selectedViews"
         :subtitle="view.subtitle"
         :title="view.title"

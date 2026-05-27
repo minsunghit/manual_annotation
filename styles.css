@@ -23,7 +23,7 @@ html,
 body {
   margin: 0;
   width: 100%;
-  min-height: 100%;
+  height: 100%;
   font-family:
     Inter,
     "Noto Sans SC",
@@ -31,8 +31,7 @@ body {
     sans-serif;
   background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
   color: var(--text-strong);
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 button,
@@ -46,17 +45,18 @@ button {
 }
 
 .workspace-shell {
-  min-height: 100vh;
-  padding: 18px;
+  height: 100vh;
+  padding: 14px;
   display: grid;
-  grid-template-rows: auto auto auto;
-  gap: 18px;
-  overflow: visible;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+  overflow: hidden;
 }
 
 .topbar,
 .asset-pane,
 .annotation-panel,
+.orthographic-panel,
 .ortho-card {
   border: 1px solid var(--panel-border);
   box-shadow: var(--shadow-soft);
@@ -199,9 +199,18 @@ button {
 
 .workspace-grid {
   min-height: 0;
+  height: 100%;
   display: grid;
-  grid-template-columns: 316px minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: 258px minmax(0, 1.16fr) minmax(214px, 0.48fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.workspace-grid__sidebar,
+.workspace-grid__main,
+.orthographic-panel {
+  min-height: 0;
+  height: 100%;
 }
 
 .asset-pane,
@@ -215,8 +224,11 @@ button {
 .asset-pane {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 14px;
-  padding: 18px;
+  gap: 12px;
+  padding: 14px;
+  height: 100%;
+  max-height: none;
+  overflow: hidden;
 }
 
 .asset-pane__header {
@@ -285,6 +297,8 @@ button {
   height: 100%;
   overflow: auto;
   display: grid;
+  grid-auto-rows: max-content;
+  align-content: start;
   gap: 12px;
   padding-right: 4px;
 }
@@ -371,9 +385,11 @@ button {
 }
 
 .asset-card__title {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 800;
   color: var(--text-strong);
+  line-height: 1.25;
+  word-break: break-word;
 }
 
 .asset-card__pano,
@@ -411,6 +427,10 @@ button {
 .annotation-panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px;
+  overflow: hidden;
+  height: 100%;
 }
 
 .annotation-panel--empty {
@@ -428,8 +448,8 @@ button {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 16px;
-  padding: 16px 18px;
+  gap: 12px;
+  padding: 0 0 12px;
   border-bottom: 1px solid #e6edf5;
 }
 
@@ -517,14 +537,16 @@ button {
 
 .main-view {
   position: relative;
-  min-height: 560px;
-  margin: 16px;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  max-width: 100%;
   border-radius: 22px;
   border: 1px solid #334155;
   overflow: hidden;
   background: linear-gradient(180deg, #0f172a 0%, #1e293b 55%, #111827 100%);
   box-shadow: var(--shadow-deep);
-  aspect-ratio: 2.55 / 1;
+  aspect-ratio: auto;
 }
 
 .main-view::before {
@@ -680,7 +702,10 @@ button {
 .asset-inspector {
   top: 88px;
   right: 20px;
-  width: 222px;
+  width: 208px;
+  max-width: calc(100% - 40px);
+  max-height: calc(100% - 108px);
+  overflow: auto;
   padding: 14px;
   background: rgba(255, 255, 255, 0.94);
 }
@@ -719,15 +744,23 @@ button {
 
 .orthographic-panel {
   display: grid;
-  gap: 12px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 14px;
+  border-radius: 24px;
+  background: var(--panel-bg);
+  backdrop-filter: blur(10px);
+  overflow: hidden;
 }
 
 .orthographic-panel__header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   flex-wrap: wrap;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e6edf5;
 }
 
 .legend-row {
@@ -766,12 +799,14 @@ button {
 
 .ortho-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: 1fr;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  min-height: 0;
 }
 
 .ortho-card {
-  min-height: 248px;
+  min-height: 0;
   border-radius: 20px;
   overflow: hidden;
   background: var(--panel-solid);
@@ -785,8 +820,8 @@ button {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: 10px;
+  padding: 10px 12px;
   border-bottom: 1px solid #eef2f7;
 }
 
@@ -798,8 +833,8 @@ button {
 .ortho-card__stage {
   position: relative;
   width: 100%;
-  aspect-ratio: 2.55 / 1;
-  min-height: 190px;
+  height: calc(100% - 52px);
+  min-height: 0;
 }
 
 .ortho-card__viewport {
@@ -867,19 +902,58 @@ button {
   stroke: #e0f2fe;
 }
 
-@media (max-width: 1240px) {
+@media (max-width: 1480px) {
   .workspace-grid {
+    grid-template-columns: 232px minmax(0, 1fr) minmax(200px, 0.44fr);
+  }
+}
+
+@media (max-width: 1240px) {
+  html,
+  body {
+    overflow-y: auto;
+  }
+
+  .workspace-shell {
+    height: auto;
+    overflow: visible;
+  }
+
+  .workspace-grid {
+    height: auto;
     grid-template-columns: 1fr;
   }
 
-  .asset-pane {
-    max-height: 420px;
+  .main-view {
+    min-height: 420px;
+  }
+
+  .orthographic-panel {
+    height: auto;
+  }
+
+  .ortho-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+  }
+
+  .ortho-card__stage {
+    height: auto;
+    aspect-ratio: 2.2 / 1;
+    min-height: 180px;
   }
 }
 
 @media (max-width: 900px) {
+  html,
+  body {
+    overflow-y: auto;
+  }
+
   .workspace-shell {
     padding: 12px;
+    height: auto;
+    overflow: visible;
   }
 
   .topbar,
@@ -894,12 +968,10 @@ button {
     justify-content: flex-start;
   }
 
-  .ortho-grid {
-    grid-template-columns: 1fr;
-  }
-
   .main-view {
     min-height: 420px;
+    width: 100%;
+    max-width: 100%;
   }
 
   .asset-inspector {

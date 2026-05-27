@@ -20,3 +20,26 @@ export async function fetchWorkspace(sceneId, roomName) {
 
   return response.json()
 }
+
+export async function confirmAsset(sceneId, roomName, assetId, revisionId, pose, box, savedAtIso) {
+  const response = await fetch(`/api/assets/${encodeURIComponent(assetId)}/confirm`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      sceneId,
+      roomName,
+      revisionId,
+      pose,
+      box,
+      savedAtIso,
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to confirm asset: ${response.status}`)
+  }
+
+  return response.json()
+}

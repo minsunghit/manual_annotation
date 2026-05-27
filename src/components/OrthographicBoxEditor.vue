@@ -13,6 +13,7 @@ const props = defineProps<{
   localBounds: LocalBounds | null
   localPoints: Vec3[]
   meshes: { layoutUrl: string; rawUrl: string } | null
+  selectedAssetId: string
   selectedViews: string[]
   subtitle: string
   title: string
@@ -29,6 +30,8 @@ const svgRef = ref<SVGSVGElement | null>(null)
 const activeHandle = ref<BoxHandle | null>(null)
 const projectionVersion = ref(0)
 const panOffset = ref<Vec2>([0, 0])
+const framedCenter = ref<Vec3 | null>(null)
+const framedAssetId = ref('')
 
 let renderer: THREE.WebGLRenderer | null = null
 let scene: THREE.Scene | null = null
@@ -46,6 +49,24 @@ let activePointerId: number | null = null
 let panPointerId: number | null = null
 let panStartPointer: Vec2 | null = null
 let panStartOffset: Vec2 = [0, 0]
+let panContext:
+  | {
+      camera: THREE.OrthographicCamera
+      planeNormal: THREE.Vector3
+      planeOrigin: THREE.Vector3
+      boxCenter: Vec3 | null
+      boxYaw: number
+    }
+  | null = null
+let dragContext:
+  | {
+      camera: THREE.OrthographicCamera
+      planeNormal: THREE.Vector3
+      planeOrigin: THREE.Vector3
+      boxCenter: Vec3 | null
+      boxYaw: number
+    }
+  | null = null
 
 function applyClippingToGroup(group: THREE.Group | null) {
   if (!group) {
@@ -297,7 +318,12 @@ function updateCamera() {
   const width = viewportRef.value.clientWidth || 1
   const height = viewportRef.value.clientHeight || 1
   const aspect = width / height
-  const center = sceneBounds.getCenter(new THREE.Vector3())
+  const baseCenter = framedCenter.value
+    ? new THREE.Vector3(framedCenter.value[0], framedCenter.value[1], framedCenter.value[2])
+    : props.box
+      ? new THREE.Vector3(props.box.center[0], props.box.center[1], props.box.center[2])
+      : sceneBounds.getCenter(new THREE.Vector3())
+  const center = baseCenter.clone()
   if (props.view === 'top') {
     center.x += panOffset.value[0]
     center.z += panOffset.value[1]
@@ -315,7 +341,15 @@ function updateCamera() {
   const size = sceneBounds.getSize(new THREE.Vector3())
   const maxWidth = props.view === 'top' ? size.x : props.view === 'front' ? size.x : size.z
   const maxHeight = props.view === 'top' ? size.z : size.y
-  const baseFrustumHeight = Math.max(maxHeight * 1.32, maxWidth / Math.max(aspect, 0.1), 1)
+  const targetCoverage = 0.4
+  const boxWidth = props.box ? (props.view === 'top' ? props.box.size[0] : props.view === 'front' ? props.box.size[0] : props.box.size[2]) : 0
+  const boxHeight = props.box ? (props.view === 'top' ? props.box.size[2] : props.box.size[1]) : 0
+  const objectFrustumHeight =
+    props.box && boxWidth > 0 && boxHeight > 0
+      ? Math.max(boxHeight / targetCoverage, boxWidth / (Math.max(aspect, 0.1) * targetCoverage), 1)
+      : 0
+  const sceneFrustumHeight = Math.max(maxHeight * 1.18, maxWidth / Math.max(aspect, 0.1), 1)
+  const baseFrustumHeight = props.box ? Math.max(objectFrustumHeight, 1) : sceneFrustumHeight
   const frustumHeight = baseFrustumHeight * Math.max(props.workspaceZoom, 0.2)
   const frustumWidth = frustumHeight * aspect
   const { forward, up } = getViewBasis()
@@ -482,29 +516,49 @@ const handles = computed<HandleDefinition[]>(() => {
   ]
 })
 
-function screenToPlane(clientX: number, clientY: number): Vec2 {
-  if (!camera || !viewportRef.value) {
+function screenToPlane(
+  clientX: number,
+  clientY: number,
+  context?: {
+    camera: THREE.OrthographicCamera
+    planeNormal: THREE.Vector3
+    planeOrigin: THREE.Vector3
+    boxCenter: Vec3 | null
+    boxYaw: number
+  },
+): Vec2 {
+  const activeCamera = context?.camera || camera
+  if (!activeCamera || !viewportRef.value) {
     return [0, 0]
   }
 
   const rect = viewportRef.value.getBoundingClientRect()
   const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
   const raycaster = new THREE.Raycaster()
-  raycaster.setFromCamera(ndc, camera)
-  const { planeNormal, planeOrigin } = getViewBasis()
+  raycaster.setFromCamera(ndc, activeCamera)
+  const planeNormal = context?.planeNormal || getViewBasis().planeNormal
+  const planeOrigin = context?.planeOrigin || getViewBasis().planeOrigin
   const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, planeOrigin)
   const hit = new THREE.Vector3()
   raycaster.ray.intersectPlane(plane, hit)
+  const boxCenter = context?.boxCenter || (props.box ? props.box.center : null)
+  const boxYaw = context?.boxYaw ?? props.box?.yaw ?? 0
 
   if (props.view === 'top') {
     return [hit.x, hit.z]
   }
   if (props.view === 'front') {
-    const [localX] = inverseRotateXZ(hit.x - props.box!.center[0], hit.z - props.box!.center[2], props.box!.yaw)
-    return [localX, hit.y - props.box!.center[1]]
+    if (!boxCenter) {
+      return [hit.x, hit.y]
+    }
+    const [localX] = inverseRotateXZ(hit.x - boxCenter[0], hit.z - boxCenter[2], boxYaw)
+    return [localX, hit.y - boxCenter[1]]
   }
-  const [, localZ] = inverseRotateXZ(hit.x - props.box!.center[0], hit.z - props.box!.center[2], props.box!.yaw)
-  return [localZ, hit.y - props.box!.center[1]]
+  if (!boxCenter) {
+    return [hit.z, hit.y]
+  }
+  const [, localZ] = inverseRotateXZ(hit.x - boxCenter[0], hit.z - boxCenter[2], boxYaw)
+  return [localZ, hit.y - boxCenter[1]]
 }
 
 function onPointerDown(event: PointerEvent, handle: BoxHandle) {
@@ -515,19 +569,27 @@ function onPointerDown(event: PointerEvent, handle: BoxHandle) {
   event.preventDefault()
   activeHandle.value = handle
   activePointerId = event.pointerId
-  dragState = createBoxDragState(props.box, props.view, handle, screenToPlane(event.clientX, event.clientY))
+  const basis = getViewBasis()
+  dragContext = {
+    camera: camera!.clone(),
+    planeNormal: basis.planeNormal.clone(),
+    planeOrigin: basis.planeOrigin.clone(),
+    boxCenter: [...props.box.center] as Vec3,
+    boxYaw: props.box.yaw,
+  }
+  dragState = createBoxDragState(props.box, props.view, handle, screenToPlane(event.clientX, event.clientY, dragContext))
   window.addEventListener('pointermove', onPointerMove)
   window.addEventListener('pointerup', onPointerUp)
 }
 
 function onPointerMove(event: PointerEvent) {
   if (dragState && activePointerId === event.pointerId) {
-    emit('update:box', updateBox3DFromDrag(dragState, screenToPlane(event.clientX, event.clientY)))
+    emit('update:box', updateBox3DFromDrag(dragState, screenToPlane(event.clientX, event.clientY, dragContext || undefined)))
     return
   }
 
   if (panPointerId === event.pointerId && panStartPointer) {
-    const pointer = screenToPlane(event.clientX, event.clientY)
+    const pointer = screenToPlane(event.clientX, event.clientY, panContext || undefined)
     panOffset.value = [
       panStartOffset[0] - (pointer[0] - panStartPointer[0]),
       panStartOffset[1] - (pointer[1] - panStartPointer[1]),
@@ -541,11 +603,13 @@ function onPointerUp(event: PointerEvent) {
     dragState = null
     activeHandle.value = null
     activePointerId = null
+    dragContext = null
   }
 
   if (panPointerId === event.pointerId) {
     panPointerId = null
     panStartPointer = null
+    panContext = null
   }
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', onPointerUp)
@@ -558,10 +622,30 @@ function onViewportPanStart(event: PointerEvent) {
 
   event.preventDefault()
   panPointerId = event.pointerId
-  panStartPointer = screenToPlane(event.clientX, event.clientY)
+  const basis = getViewBasis()
+  panContext = {
+    camera: camera!.clone(),
+    planeNormal: basis.planeNormal.clone(),
+    planeOrigin: basis.planeOrigin.clone(),
+    boxCenter: props.box ? ([...props.box.center] as Vec3) : null,
+    boxYaw: props.box?.yaw ?? 0,
+  }
+  panStartPointer = screenToPlane(event.clientX, event.clientY, panContext)
   panStartOffset = [...panOffset.value] as Vec2
   window.addEventListener('pointermove', onPointerMove)
   window.addEventListener('pointerup', onPointerUp)
+}
+
+function recenterToCurrentAsset() {
+  if (props.box) {
+    framedCenter.value = [...props.box.center] as Vec3
+    framedAssetId.value = props.selectedAssetId
+  } else {
+    framedCenter.value = null
+    framedAssetId.value = ''
+  }
+  panOffset.value = [0, 0]
+  updateCamera()
 }
 
 onMounted(() => {
@@ -596,6 +680,7 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', onPointerUp)
+  dragContext = null
   disposeGroup(layoutGroup)
   disposeGroup(rawGroup)
   disposeGroup(assetGroup)
@@ -658,10 +743,30 @@ watch(
 )
 
 watch(
-  () => props.localPoints,
+  () => props.selectedAssetId,
   () => {
-    panOffset.value = [0, 0]
+    recenterToCurrentAsset()
   },
+)
+
+watch(
+  () => props.box,
+  (box) => {
+    if (box && framedAssetId.value !== props.selectedAssetId) {
+      framedCenter.value = [...box.center] as Vec3
+      framedAssetId.value = props.selectedAssetId
+      panOffset.value = [0, 0]
+      updateCamera()
+      return
+    }
+
+    if (!framedCenter.value && box) {
+      framedCenter.value = [...box.center] as Vec3
+      framedAssetId.value = props.selectedAssetId
+      updateCamera()
+    }
+  },
+  { deep: true, immediate: true },
 )
 </script>
 

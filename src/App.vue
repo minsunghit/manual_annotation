@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 
-import { fetchScenes, fetchWorkspace } from './api/workspaceApi'
+import { confirmAsset, fetchScenes, fetchWorkspace } from './api/workspaceApi'
 import AnnotationWorkspace from './components/AnnotationWorkspace.vue'
 import AssetSidebar from './components/AssetSidebar.vue'
 import OrthographicReview from './components/OrthographicReview.vue'
@@ -39,8 +39,6 @@ interface SavedAssetState {
   pose: AssetPose
   savedAtIso: string
 }
-
-const STORAGE_PREFIX = 'manual-annotation:saved-assets'
 
 const sceneOptions = ref<SceneOption[]>([])
 const selectedScene = ref('')
@@ -93,35 +91,6 @@ function formatSavedTime(savedAtIso: string): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
-function getStorageKey(sceneId: string, roomName: string): string {
-  return `${STORAGE_PREFIX}:${sceneId}:${roomName}`
-}
-
-function loadSavedAssetMap(sceneId: string, roomName: string): Record<string, SavedAssetState> {
-  if (typeof window === 'undefined') {
-    return {}
-  }
-
-  const raw = window.localStorage.getItem(getStorageKey(sceneId, roomName))
-  if (!raw) {
-    return {}
-  }
-
-  try {
-    return (JSON.parse(raw) as Record<string, SavedAssetState>) || {}
-  } catch {
-    return {}
-  }
-}
-
-function persistSavedAssetMap(sceneId: string, roomName: string, savedMap: Record<string, SavedAssetState>) {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  window.localStorage.setItem(getStorageKey(sceneId, roomName), JSON.stringify(savedMap))
-}
-
 function toggleView(view: string) {
   if (selectedViews.value.includes(view)) {
     if (selectedViews.value.length > 1) {
@@ -160,6 +129,21 @@ function applySavedStatesToAssets(assets: WorkspaceAsset[], savedMap: Record<str
     const savedState = savedMap[asset.id]
     return savedState ? { ...asset, pose: clonePose(savedState.pose) } : asset
   })
+}
+
+function buildSavedAssetMapFromAssets(assets: WorkspaceAsset[]): Record<string, SavedAssetState> {
+  return assets.reduce<Record<string, SavedAssetState>>((result, asset) => {
+    if (!asset.savedAtIso || !asset.savedBox) {
+      return result
+    }
+
+    result[asset.id] = {
+      box: cloneBox(asset.savedBox),
+      pose: clonePose(asset.pose),
+      savedAtIso: asset.savedAtIso,
+    }
+    return result
+  }, {})
 }
 
 function deriveFloorY(asset: WorkspaceAsset, payload: AssetGeometryPayload): number {
@@ -238,7 +222,7 @@ function onAssetGeometryLoaded(payload: AssetGeometryPayload) {
   }
 }
 
-function onConfirmAsset() {
+async function onConfirmAsset() {
   if (!selectedAsset.value || !box3d.value) {
     return
   }
@@ -250,18 +234,26 @@ function onConfirmAsset() {
 
   const pose = derivePoseFromBox(box3d.value, geometry, workspace.value.roomAnchor, selectedAsset.value.pose)
   const savedAtIso = new Date().toISOString()
+  const response = await confirmAsset(
+    'scene_000',
+    selectedScene.value,
+    selectedAsset.value.id,
+    selectedAsset.value.revisionId,
+    pose,
+    box3d.value,
+    savedAtIso,
+  )
   const nextSavedMap = {
     ...savedAssetMap.value,
     [selectedAsset.value.id]: {
-      box: cloneBox(box3d.value),
-      pose: clonePose(pose),
-      savedAtIso,
+      box: cloneBox(response.box || box3d.value),
+      pose: clonePose(response.pose || pose),
+      savedAtIso: response.savedAtIso || savedAtIso,
     },
   }
 
   savedAssetMap.value = nextSavedMap
-  updateWorkspaceAssetPose(selectedAsset.value.id, pose)
-  persistSavedAssetMap('scene_000', selectedScene.value, nextSavedMap)
+  updateWorkspaceAssetPose(selectedAsset.value.id, response.pose || pose)
 }
 
 function onResetAsset() {
@@ -295,7 +287,9 @@ function exportBoxJson() {
 
 async function loadSceneOptions() {
   const payload = await fetchScenes()
-  const rooms = payload.scenes.find((item: { id: string; roomOptions?: Array<{ roomName: string; label: string }> }) => item.id === 'scene_000')?.roomOptions || []
+  const rooms =
+    payload.scenes.find((item: { id: string; roomOptions?: Array<{ roomName: string; label: string }> }) => item.id === 'scene_000')
+      ?.roomOptions || []
   sceneOptions.value = rooms.map((item) => ({
     value: item.roomName,
     label: item.label,
@@ -317,7 +311,7 @@ async function loadWorkspace(roomName: string) {
 
   try {
     const payload = await fetchWorkspace('scene_000', roomName)
-    const loadedSavedMap = loadSavedAssetMap('scene_000', roomName)
+    const loadedSavedMap = buildSavedAssetMapFromAssets(payload.assets || [])
     savedAssetMap.value = loadedSavedMap
     workspace.value = {
       assets: applySavedStatesToAssets(payload.assets || [], loadedSavedMap),
@@ -336,7 +330,12 @@ async function loadWorkspace(roomName: string) {
 }
 
 onMounted(async () => {
-  await loadSceneOptions()
+  try {
+    await loadSceneOptions()
+  } catch (error) {
+    loading.value = false
+    errorText.value = error instanceof Error ? error.message : 'Failed to load scene options.'
+  }
 })
 
 watch(selectedScene, async (roomName, previousRoomName) => {
@@ -368,45 +367,50 @@ watch(selectedAssetId, (assetId, previousAssetId) => {
     />
 
     <main class="workspace-grid">
-      <AssetSidebar
-        :assets="workspace.assets"
-        :selected-asset-id="selectedAssetId"
-        @select-asset="selectedAssetId = $event"
-      />
+      <div class="workspace-grid__sidebar">
+        <AssetSidebar
+          :assets="workspace.assets"
+          :selected-asset-id="selectedAssetId"
+          @select-asset="selectedAssetId = $event"
+        />
+      </div>
 
-      <AnnotationWorkspace
-        v-if="selectedAsset"
-        :assets="workspace.assets"
-        :box3d="box3d"
+      <div class="workspace-grid__main">
+        <AnnotationWorkspace
+          v-if="selectedAsset"
+          :assets="workspace.assets"
+          :box3d="box3d"
+          :meshes="workspace.meshes"
+          :room-anchor="workspace.roomAnchor"
+          :selected-asset="selectedAsset"
+          :selected-asset-id="selectedAssetId"
+          :selected-views="selectedViews"
+          :status-chips="placementStatusChips"
+          @asset-geometry-loaded="onAssetGeometryLoaded"
+          @confirm-asset="onConfirmAsset"
+          @reset-asset="onResetAsset"
+          @toggle-view="toggleView"
+        />
+        <section v-else class="annotation-panel annotation-panel--empty">
+          <div class="annotation-panel__empty">
+            <div v-if="loading">Loading workspace...</div>
+            <div v-else-if="errorText">{{ errorText }}</div>
+            <div v-else>No assets available for this room.</div>
+          </div>
+        </section>
+      </div>
+
+      <OrthographicReview
+        :box="box3d"
+        :local-bounds="assetLocalBounds"
+        :local-points="assetLocalPoints"
         :meshes="workspace.meshes"
-        :room-anchor="workspace.roomAnchor"
-        :selected-asset="selectedAsset"
+        :ortho-zoom="orthoZoom"
         :selected-asset-id="selectedAssetId"
         :selected-views="selectedViews"
-        :status-chips="placementStatusChips"
-        @asset-geometry-loaded="onAssetGeometryLoaded"
-        @confirm-asset="onConfirmAsset"
-        @reset-asset="onResetAsset"
-        @toggle-view="toggleView"
+        @update:box="box3d = $event"
+        @update:ortho-zoom="orthoZoom = $event"
       />
-      <section v-else class="annotation-panel annotation-panel--empty">
-        <div class="annotation-panel__empty">
-          <div v-if="loading">Loading workspace...</div>
-          <div v-else-if="errorText">{{ errorText }}</div>
-          <div v-else>No assets available for this room.</div>
-        </div>
-      </section>
     </main>
-
-    <OrthographicReview
-      :box="box3d"
-      :local-bounds="assetLocalBounds"
-      :local-points="assetLocalPoints"
-      :meshes="workspace.meshes"
-      :ortho-zoom="orthoZoom"
-      :selected-views="selectedViews"
-      @update:box="box3d = $event"
-      @update:ortho-zoom="orthoZoom = $event"
-    />
   </div>
 </template>

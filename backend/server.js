@@ -36,9 +36,43 @@ function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'))
 }
 
+function writeJson(filePath, value) {
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+}
+
 function pathToUrl(prefix, absolutePath, rootDir) {
   const relative = path.relative(rootDir, absolutePath).split(path.sep).join('/')
   return `${prefix}/${encodeURI(relative)}`
+}
+
+function resolvePanoramaFolder(sceneId, roomTask, result) {
+  const candidates = [
+    result?.room_context?.panorama_folder,
+    roomTask?.scene_snapshot?.panoramaFolder,
+    roomTask?.panoramaFolder,
+    roomTask?.panorama_folder,
+  ]
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string' || !candidate) {
+      continue
+    }
+
+    const directPath = path.join(SCENE_ROOT, sceneId, 'panorama', candidate)
+    if (fs.existsSync(directPath)) {
+      return candidate
+    }
+
+    const matchedDir = fs
+      .readdirSync(path.join(SCENE_ROOT, sceneId, 'panorama'), { withFileTypes: true })
+      .find((entry) => entry.isDirectory() && (entry.name === candidate || entry.name.endsWith(`_${candidate}`)))
+
+    if (matchedDir) {
+      return matchedDir.name
+    }
+  }
+
+  return ''
 }
 
 function findRoomTaskDirs(sceneId) {
@@ -76,7 +110,7 @@ function findRoomTaskDirs(sceneId) {
   return result
 }
 
-function collectAssets(roomTaskDir) {
+function collectAssets(sceneId, roomTaskDir, roomTask) {
   const objectsDir = path.join(roomTaskDir, 'objects')
   if (!fs.existsSync(objectsDir)) {
     return []
@@ -113,17 +147,23 @@ function collectAssets(roomTaskDir) {
     const result = readJson(resultPath)
     const previewPath = path.join(revisionDir, 'segmentation', 'segmentation_preview.png')
     const pose = result.pose || {}
+    const annotation = result.manual_annotation || {}
     const objectGlbPath = path.join(revisionDir, 'generated', path.basename(result.generated_dir || ''), 'object.glb')
+    const panoFolder = resolvePanoramaFolder(sceneId, roomTask, result)
+    const panoDir = panoFolder ? path.join(SCENE_ROOT, sceneId, 'panorama', panoFolder) : ''
 
     assets.push({
       id: objectInstance.id,
       revisionId,
+      sceneId,
+      roomName: roomTask?.panorama_folder || roomTask?.display_name || '',
       name:
         objectInstance.metadata?.furniture_object_name ||
         objectInstance.object_type ||
         objectInstance.display_name ||
         objectInstance.id,
-      pano: objectInstance.metadata?.panorama_folder || objectInstance.metadata?.panorama || 'room-view',
+      pano: panoFolder || result?.room_context?.panorama_folder || objectInstance.metadata?.panorama_folder || objectInstance.metadata?.panorama || roomTask?.panorama_folder || 'room-view',
+      panoUrl: panoDir ? pathToUrl('/api/static/scene', panoDir, SCENE_ROOT) : null,
       category: objectInstance.object_type || 'object',
       status: 'active',
       pose: {
@@ -138,6 +178,8 @@ function collectAssets(roomTaskDir) {
         ? pathToUrl('/api/static/outputs', objectGlbPath, OUTPUTS_ROOT)
         : null,
       bbox: result.bbox || null,
+      savedAtIso: typeof annotation.savedAtIso === 'string' ? annotation.savedAtIso : '',
+      savedBox: annotation.box3d || null,
     })
   }
 
@@ -226,12 +268,46 @@ function buildWorkspacePayload(sceneId, roomName) {
     roomOptions,
     meshes: buildRoomMeshUrls(sceneId, currentRoom.roomName),
     roomAnchor: getRoomAnchor(sceneId, currentRoom.roomName),
-    assets: collectAssets(currentRoom.roomTaskDir),
+    assets: collectAssets(sceneId, currentRoom.roomTaskDir, currentRoom.roomTask),
   }
+}
+
+function getCurrentRoomTask(sceneId, roomName) {
+  const roomTasks = findRoomTaskDirs(sceneId)
+  return roomTasks.find((entry) => entry.roomName === roomName) || null
+}
+
+function getRevisionResultPath(sceneId, roomName, assetId, revisionId) {
+  const roomTask = getCurrentRoomTask(sceneId, roomName)
+  if (!roomTask) {
+    return null
+  }
+
+  const objectDir = path.join(roomTask.roomTaskDir, 'objects', assetId)
+  const resultPath = path.join(objectDir, 'revisions', revisionId, 'result.json')
+  return fs.existsSync(resultPath) ? resultPath : null
+}
+
+function isVec3(value) {
+  return Array.isArray(value) && value.length === 3 && value.every((item) => Number.isFinite(item))
+}
+
+function isVec4(value) {
+  return Array.isArray(value) && value.length === 4 && value.every((item) => Number.isFinite(item))
+}
+
+function isBox3D(value) {
+  return Boolean(
+    value &&
+      isVec3(value.center) &&
+      isVec3(value.size) &&
+      Number.isFinite(value.yaw),
+  )
 }
 
 const app = express()
 
+app.use(express.json())
 app.use('/api/static/scene', express.static(SCENE_ROOT))
 app.use('/api/static/outputs', express.static(OUTPUTS_ROOT))
 
@@ -257,6 +333,56 @@ app.get('/api/workspace/:sceneId', (req, res) => {
   const { sceneId } = req.params
   const roomName = typeof req.query.room === 'string' ? req.query.room : ''
   res.json(buildWorkspacePayload(sceneId, roomName))
+})
+
+app.post('/api/assets/:assetId/confirm', (req, res) => {
+  const { assetId } = req.params
+  const { sceneId, roomName, revisionId, pose, box, savedAtIso } = req.body || {}
+
+  if (
+    typeof sceneId !== 'string' ||
+    typeof roomName !== 'string' ||
+    typeof revisionId !== 'string' ||
+    !pose ||
+    !isVec3(pose.translation) ||
+    !isVec4(pose.rotation) ||
+    !isVec3(pose.scale) ||
+    !isBox3D(box)
+  ) {
+    res.status(400).json({ error: 'Invalid confirm payload.' })
+    return
+  }
+
+  const resultPath = getRevisionResultPath(sceneId, roomName, assetId, revisionId)
+  if (!resultPath) {
+    res.status(404).json({ error: 'Revision result.json not found.' })
+    return
+  }
+
+  const result = readJson(resultPath)
+  result.pose = {
+    ...(result.pose || {}),
+    translation_xyz: pose.translation,
+    rotation_quat_wxyz: pose.rotation,
+    scale_xyz: pose.scale,
+  }
+  result.manual_annotation = {
+    ...(result.manual_annotation || {}),
+    box3d: box,
+    savedAtIso: typeof savedAtIso === 'string' && savedAtIso ? savedAtIso : new Date().toISOString(),
+  }
+
+  writeJson(resultPath, result)
+  res.json({
+    ok: true,
+    savedAtIso: result.manual_annotation.savedAtIso,
+    pose: {
+      translation: result.pose.translation_xyz,
+      rotation: result.pose.rotation_quat_wxyz,
+      scale: result.pose.scale_xyz,
+    },
+    box: result.manual_annotation.box3d,
+  })
 })
 
 app.listen(PORT, () => {

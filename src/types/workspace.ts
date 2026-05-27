@@ -21,8 +21,11 @@ export interface AssetPose {
 export interface WorkspaceAsset {
   id: string
   revisionId: string
+  sceneId?: string
+  roomName?: string
   name: string
   pano: string
+  panoUrl?: string | null
   category: string
   status: string
   pose: AssetPose
@@ -34,6 +37,8 @@ export interface WorkspaceAsset {
     width: number
     height: number
   } | null
+  savedAtIso?: string
+  savedBox?: Box3D | null
 }
 
 export interface WorkspaceMeshes {

@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename)
 const ROOT_DIR = path.resolve(__dirname, '..')
 const SCENE_ROOT = path.join(ROOT_DIR, 'scene')
 const OUTPUTS_ROOT = path.join(ROOT_DIR, 'outputs')
-const PORT = 8787
+const PORT = Number(process.env.MANUAL_ANNOTATION_API_PORT || 8788)
 
 const ROOM_NAME_TO_LAYOUT = {
   '\u5367\u5BA4A': 'bedroom_a',

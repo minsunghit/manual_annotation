@@ -13,6 +13,7 @@ const props = defineProps<{
   localBounds: LocalBounds | null
   localPoints: Vec3[]
   meshes: { layoutUrl: string; rawUrl: string } | null
+  hasGeometryCollision: boolean
   selectedAssetId: string
   selectedViews: string[]
   subtitle: string
@@ -784,7 +785,12 @@ watch(
       <div ref="viewportRef" class="ortho-card__viewport"></div>
       <svg ref="svgRef" class="ortho-card__overlay" viewBox="0 0 392 154" preserveAspectRatio="none" @pointerdown="onViewportPanStart">
         <path v-if="polygonPath" class="ortho-box__fill" :d="polygonPath" @pointerdown="onPointerDown($event, 'move')" />
-        <path v-if="polygonPath" class="ortho-box__stroke" :d="polygonPath" />
+        <path
+          v-if="polygonPath"
+          class="ortho-box__stroke"
+          :class="{ 'ortho-box__stroke--collision': hasGeometryCollision }"
+          :d="polygonPath"
+        />
         <line
           v-if="view === 'top' && handles.find((handle) => handle.key === 'rotate')"
           class="ortho-box__rotation-link"

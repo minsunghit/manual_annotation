@@ -9,6 +9,7 @@ import WorkspaceTopbar from './components/WorkspaceTopbar.vue'
 import { placementStatusChips } from './data/workspaceData'
 import type { LocalBounds } from './utils/assetBoxTransform'
 import { roomYaw } from './utils/assetBoxTransform'
+import { applyCollisionAvoidance, applySnap, evaluateCollision } from './utils/box3dAssist'
 import { getBox3DJson, rotateXZ } from './utils/box3dMath'
 import type {
   AssetGeometryPayload,
@@ -16,6 +17,7 @@ import type {
   Box3D,
   RoomAnchor,
   SceneOption,
+  SceneSnapEnvironment,
   Vec3,
   WorkspaceAsset,
   WorkspaceMeshes,
@@ -57,6 +59,11 @@ const activeBoxAssetId = ref('')
 const orthoZoom = ref(1)
 const loading = ref(true)
 const errorText = ref('')
+const snapEnabled = ref(false)
+const collisionAvoidanceEnabled = ref(false)
+const assistMessage = ref('')
+const hasGeometryCollision = ref(false)
+const sceneEnvironment = ref<SceneSnapEnvironment | null>(null)
 const assetGeometryMap = ref<Record<string, AssetGeometryState>>({})
 const savedAssetMap = ref<Record<string, SavedAssetState>>({})
 
@@ -113,6 +120,9 @@ function clearBoxState() {
 
 function clearSceneState() {
   clearBoxState()
+  sceneEnvironment.value = null
+  assistMessage.value = ''
+  hasGeometryCollision.value = false
   assetGeometryMap.value = {}
   savedAssetMap.value = {}
 }
@@ -219,7 +229,42 @@ function onAssetGeometryLoaded(payload: AssetGeometryPayload) {
   if (activeBoxAssetId.value !== payload.assetId) {
     box3d.value = savedState ? cloneBox(savedState.box) : cloneBox(payload.box)
     activeBoxAssetId.value = payload.assetId
+    refreshCollisionStatus(box3d.value)
   }
+}
+
+function refreshCollisionStatus(box: Box3D | null = box3d.value) {
+  if (!box) {
+    assistMessage.value = ''
+    hasGeometryCollision.value = false
+    return
+  }
+
+  const collision = evaluateCollision(box, assetLocalPoints.value, assetLocalBounds.value, sceneEnvironment.value)
+  hasGeometryCollision.value = collision.collision
+  assistMessage.value = collision.collision ? 'Geometry collision detected' : ''
+}
+
+function updateBoxWithAssist(nextBox: Box3D) {
+  const snappedBox = snapEnabled.value
+    ? applySnap(nextBox, box3d.value, sceneEnvironment.value, assetLocalBounds.value)
+    : nextBox
+  const assisted = applyCollisionAvoidance(
+    snappedBox,
+    assetLocalPoints.value,
+    assetLocalBounds.value,
+    sceneEnvironment.value,
+    collisionAvoidanceEnabled.value,
+  )
+
+  box3d.value = assisted.box
+  hasGeometryCollision.value = assisted.collision
+  assistMessage.value = assisted.message
+}
+
+function onSceneEnvironmentLoaded(payload: SceneSnapEnvironment) {
+  sceneEnvironment.value = payload
+  refreshCollisionStatus()
 }
 
 async function onConfirmAsset() {
@@ -268,6 +313,7 @@ function onResetAsset() {
 
   box3d.value = cloneBox(savedState.box)
   updateWorkspaceAssetPose(selectedAsset.value.id, savedState.pose)
+  refreshCollisionStatus(box3d.value)
 }
 
 function exportBoxJson() {
@@ -353,6 +399,10 @@ watch(selectedAssetId, (assetId, previousAssetId) => {
 
   clearBoxState()
 })
+
+watch([snapEnabled, collisionAvoidanceEnabled], () => {
+  refreshCollisionStatus()
+})
 </script>
 
 <template>
@@ -385,10 +435,17 @@ watch(selectedAssetId, (assetId, previousAssetId) => {
           :selected-asset="selectedAsset"
           :selected-asset-id="selectedAssetId"
           :selected-views="selectedViews"
+          :snap-enabled="snapEnabled"
+          :collision-avoidance-enabled="collisionAvoidanceEnabled"
+          :assist-message="assistMessage"
+          :has-geometry-collision="hasGeometryCollision"
           :status-chips="placementStatusChips"
           @asset-geometry-loaded="onAssetGeometryLoaded"
+          @scene-environment-loaded="onSceneEnvironmentLoaded"
           @confirm-asset="onConfirmAsset"
           @reset-asset="onResetAsset"
+          @toggle-snap="snapEnabled = !snapEnabled"
+          @toggle-collision-avoidance="collisionAvoidanceEnabled = !collisionAvoidanceEnabled"
           @toggle-view="toggleView"
         />
         <section v-else class="annotation-panel annotation-panel--empty">
@@ -408,7 +465,8 @@ watch(selectedAssetId, (assetId, previousAssetId) => {
         :ortho-zoom="orthoZoom"
         :selected-asset-id="selectedAssetId"
         :selected-views="selectedViews"
-        @update:box="box3d = $event"
+        :has-geometry-collision="hasGeometryCollision"
+        @update:box="updateBoxWithAssist"
         @update:ortho-zoom="orthoZoom = $event"
       />
     </main>

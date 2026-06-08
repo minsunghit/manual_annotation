@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import SceneViewport from './SceneViewport.vue'
-import type { AssetGeometryPayload, Box3D, RoomAnchor, WorkspaceAsset, WorkspaceMeshes } from '../types/workspace'
+import type { AssetGeometryPayload, Box3D, RoomAnchor, SceneSnapEnvironment, WorkspaceAsset, WorkspaceMeshes } from '../types/workspace'
 
 const props = defineProps<{
   assets: WorkspaceAsset[]
@@ -11,12 +11,19 @@ const props = defineProps<{
   selectedAssetId: string
   selectedViews: string[]
   statusChips: Array<{ label: string; color: string }>
+  snapEnabled: boolean
+  collisionAvoidanceEnabled: boolean
+  assistMessage: string
+  hasGeometryCollision: boolean
 }>()
 
 const emit = defineEmits<{
   'asset-geometry-loaded': [payload: AssetGeometryPayload]
+  'scene-environment-loaded': [payload: SceneSnapEnvironment]
   'confirm-asset': []
   'reset-asset': []
+  'toggle-snap': []
+  'toggle-collision-avoidance': []
   'toggle-view': [view: string]
 }>()
 
@@ -47,7 +54,17 @@ function metricValue(metric: (typeof assetMetrics)[number], selectedAsset: Works
       </div>
 
       <div class="annotation-panel__controls">
-        <div class="metric-pill">Scene pose linked</div>
+        <button class="assist-toggle" :class="{ active: snapEnabled }" type="button" @click="emit('toggle-snap')">
+          Snap
+        </button>
+        <button
+          class="assist-toggle"
+          :class="{ active: collisionAvoidanceEnabled }"
+          type="button"
+          @click="emit('toggle-collision-avoidance')"
+        >
+          Collision Avoidance
+        </button>
         <div class="tab-switcher">
           <button
             class="tab-switcher__button"
@@ -90,7 +107,9 @@ function metricValue(metric: (typeof assetMetrics)[number], selectedAsset: Works
         :room-anchor="roomAnchor"
         :selected-asset-id="selectedAssetId"
         :selected-views="selectedViews"
+        :has-geometry-collision="hasGeometryCollision"
         @asset-geometry-loaded="emit('asset-geometry-loaded', $event)"
+        @scene-environment-loaded="emit('scene-environment-loaded', $event)"
       />
 
       <div class="coords-panel">
@@ -111,6 +130,9 @@ function metricValue(metric: (typeof assetMetrics)[number], selectedAsset: Works
         <div v-if="box3d" class="asset-inspector__row asset-inspector__row--stack">
           <span>Box JSON</span>
           <strong>{{ box3d.size.map((item) => item.toFixed(2)).join(' / ') }} @ {{ box3d.yaw.toFixed(2) }} rad</strong>
+        </div>
+        <div v-if="assistMessage" class="asset-inspector__notice" :class="{ 'asset-inspector__notice--warning': hasGeometryCollision }">
+          {{ assistMessage }}
         </div>
         <div class="asset-inspector__actions">
           <button class="action-btn action-btn--ghost action-btn--small" type="button" @click="emit('reset-asset')">Reset Pose</button>

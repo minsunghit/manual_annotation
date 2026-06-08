@@ -11,6 +11,7 @@ const props = defineProps<{
   selectedAssetId: string
   selectedViews: string[]
   orthoZoom: number
+  hasGeometryCollision: boolean
 }>()
 
 const emit = defineEmits<{
@@ -54,6 +55,7 @@ function onWheel(event: WheelEvent) {
         :local-bounds="localBounds"
         :local-points="localPoints"
         :meshes="meshes"
+        :has-geometry-collision="hasGeometryCollision"
         :selected-asset-id="selectedAssetId"
         :selected-views="selectedViews"
         :subtitle="view.subtitle"

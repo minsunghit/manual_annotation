@@ -511,6 +511,23 @@ button {
   color: #1d4ed8;
 }
 
+.assist-toggle {
+  height: 34px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  background: var(--panel-solid);
+  color: var(--text-body);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.assist-toggle.active {
+  border-color: #38bdf8;
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
 .tab-switcher {
   display: inline-flex;
   gap: 6px;
@@ -735,6 +752,21 @@ button {
   display: grid;
 }
 
+.asset-inspector__notice {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.asset-inspector__notice--warning {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
 .asset-inspector__actions {
   margin-top: 14px;
   display: grid;
@@ -874,6 +906,11 @@ button {
   stroke: #38bdf8;
   stroke-width: 1.9;
   vector-effect: non-scaling-stroke;
+}
+
+.ortho-box__stroke--collision {
+  stroke: #ef4444;
+  stroke-width: 2.4;
 }
 
 .ortho-box__rotation-link {

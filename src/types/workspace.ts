@@ -54,6 +54,39 @@ export interface Box3D {
 
 export type ProjectionView = 'top' | 'front' | 'side'
 
+export interface AssetCollisionProxy {
+  assetId: string
+  box: Box3D
+  localBounds: {
+    center: Vec3
+    size: Vec3
+  }
+  localPoints: Vec3[]
+}
+
+export interface SceneSnapEnvironment {
+  floorY: number | null
+  ceilingY: number | null
+  supportSurfaces: Vec3[]
+  wallSurfaces: Array<{
+    point: Vec3
+    normal: Vec3
+    tangent: Vec3
+    minY: number
+    maxY: number
+    minT: number
+    maxT: number
+  }>
+  roomBounds: {
+    minX: number
+    maxX: number
+    minZ: number
+    maxZ: number
+  } | null
+  wallYaws: number[]
+  assets: AssetCollisionProxy[]
+}
+
 export interface AssetGeometryPayload {
   assetId: string
   box: Box3D

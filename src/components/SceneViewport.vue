@@ -14,7 +14,7 @@ import {
   rotateLocalPointsY,
   type LocalBounds,
 } from '../utils/assetBoxTransform'
-import type { AssetGeometryPayload, Box3D, WorkspaceAsset } from '../types/workspace'
+import type { AssetCollisionProxy, AssetGeometryPayload, Box3D, SceneSnapEnvironment, WorkspaceAsset } from '../types/workspace'
 
 const props = defineProps<{
   assets: WorkspaceAsset[]
@@ -23,10 +23,12 @@ const props = defineProps<{
   roomAnchor: { position: [number, number, number]; longitude: number } | null
   selectedAssetId: string
   selectedViews: string[]
+  hasGeometryCollision: boolean
 }>()
 
 const emit = defineEmits<{
   'asset-geometry-loaded': [payload: AssetGeometryPayload]
+  'scene-environment-loaded': [payload: SceneSnapEnvironment]
 }>()
 
 const viewportRef = ref<HTMLDivElement | null>(null)
@@ -45,9 +47,21 @@ let assetRootGroup: THREE.Group | null = null
 let assetContentGroup: THREE.Group | null = null
 let boxOverlayGroup: THREE.Group | null = null
 let roomFloorY: number | null = null
+let roomCeilingY: number | null = null
 let selectedAssetLocalBounds: LocalBounds | null = null
 let selectedAssetLocalPoints: Array<[number, number, number]> = []
 let selectedAssetLocalYaw = 0
+let assetCollisionProxies: AssetCollisionProxy[] = []
+let supportSurfacePoints: Array<[number, number, number]> = []
+let wallSurfaceSamples: Array<{
+  point: [number, number, number]
+  normal: [number, number, number]
+  tangent: [number, number, number]
+  minY: number
+  maxY: number
+  minT: number
+  maxT: number
+}> = []
 let isCtrlPanActive = false
 let assetCloudLoadVersion = 0
 const loader = new GLTFLoader()
@@ -143,11 +157,13 @@ function updateCameraClipping() {
 
 function refreshRoomFloorY() {
   const candidates: number[] = []
+  const ceilingCandidates: number[] = []
 
   if (layoutGroup) {
     const layoutBox = new THREE.Box3().setFromObject(layoutGroup)
     if (!layoutBox.isEmpty()) {
       candidates.push(layoutBox.min.y)
+      ceilingCandidates.push(layoutBox.max.y)
     }
   }
 
@@ -155,10 +171,111 @@ function refreshRoomFloorY() {
     const rawBox = new THREE.Box3().setFromObject(rawGroup)
     if (!rawBox.isEmpty()) {
       candidates.push(rawBox.min.y)
+      ceilingCandidates.push(rawBox.max.y)
     }
   }
 
   roomFloorY = candidates.length > 0 ? Math.max(...candidates) : null
+  roomCeilingY = ceilingCandidates.length > 0 ? Math.min(...ceilingCandidates) : null
+}
+
+function buildRoomBounds() {
+  const box = new THREE.Box3()
+  if (layoutGroup) {
+    box.expandByObject(layoutGroup)
+  }
+  if (rawGroup) {
+    box.expandByObject(rawGroup)
+  }
+
+  if (box.isEmpty()) {
+    return null
+  }
+
+  return {
+    minX: box.min.x,
+    maxX: box.max.x,
+    minZ: box.min.z,
+    maxZ: box.max.z,
+  }
+}
+
+function refreshSupportSurfacePoints() {
+  const points: Array<[number, number, number]> = []
+  const wallSamples: typeof wallSurfaceSamples = []
+  const sourceGroups = [layoutGroup].filter(Boolean) as THREE.Group[]
+  const a = new THREE.Vector3()
+  const b = new THREE.Vector3()
+  const c = new THREE.Vector3()
+  const normal = new THREE.Vector3()
+  const centroid = new THREE.Vector3()
+
+  for (const group of sourceGroups) {
+    group.updateMatrixWorld(true)
+    group.traverse((node) => {
+      if (!(node instanceof THREE.Mesh) || !node.geometry?.attributes?.position) {
+        return
+      }
+
+      const positions = node.geometry.attributes.position
+      const indexAttr = node.geometry.index
+      const triangleCount = indexAttr ? Math.floor(indexAttr.count / 3) : Math.floor(positions.count / 3)
+      const step = Math.max(Math.floor(triangleCount / 6000), 1)
+      const getIndex = (index: number) => (indexAttr ? indexAttr.getX(index) : index)
+
+      for (let triangleIndex = 0; triangleIndex < triangleCount; triangleIndex += step) {
+        const base = triangleIndex * 3
+        a.fromBufferAttribute(positions, getIndex(base)).applyMatrix4(node.matrixWorld)
+        b.fromBufferAttribute(positions, getIndex(base + 1)).applyMatrix4(node.matrixWorld)
+        c.fromBufferAttribute(positions, getIndex(base + 2)).applyMatrix4(node.matrixWorld)
+        normal.subVectors(b, a).cross(c.clone().sub(a)).normalize()
+        if (normal.lengthSq() < 1e-8) {
+          continue
+        }
+
+        centroid.copy(a).add(b).add(c).multiplyScalar(1 / 3)
+        if (normal.y > 0.7) {
+          points.push([centroid.x, centroid.y, centroid.z])
+          continue
+        }
+
+        if (Math.abs(normal.y) < 0.25) {
+          const horizontalLength = Math.hypot(normal.x, normal.z)
+          if (horizontalLength < 1e-5) {
+            continue
+          }
+          const normalX = normal.x / horizontalLength
+          const normalZ = normal.z / horizontalLength
+          const tangent = new THREE.Vector3(-normalZ, 0, normalX)
+          const tValues = [a.dot(tangent), b.dot(tangent), c.dot(tangent)]
+          wallSamples.push({
+            point: [centroid.x, centroid.y, centroid.z],
+            normal: [normalX, 0, normalZ],
+            tangent: [tangent.x, tangent.y, tangent.z],
+            minY: Math.min(a.y, b.y, c.y),
+            maxY: Math.max(a.y, b.y, c.y),
+            minT: Math.min(...tValues),
+            maxT: Math.max(...tValues),
+          })
+        }
+      }
+    })
+  }
+
+  supportSurfacePoints = points
+  wallSurfaceSamples = wallSamples
+}
+
+function emitSceneEnvironment() {
+  emit('scene-environment-loaded', {
+    floorY: roomFloorY,
+    ceilingY: roomCeilingY,
+    supportSurfaces: supportSurfacePoints,
+    wallSurfaces: wallSurfaceSamples,
+    roomBounds: buildRoomBounds(),
+    wallYaws: [0, Math.PI * 0.5],
+    assets: assetCollisionProxies,
+  })
 }
 
 function fitCameraToCurrentContent() {
@@ -294,18 +411,27 @@ async function rebuildMarkers() {
 
   const currentVersion = ++assetCloudLoadVersion
   const unselectedAssets = props.assets.filter((asset) => asset.id !== props.selectedAssetId)
-  const groups = await Promise.all(
+  const results = await Promise.all(
     unselectedAssets.map(async (asset) => {
       const geometry = await loadAssetGeometryCache(asset)
       if (!geometry) {
         return null
       }
 
-      return buildAssetPointCloudGroup(asset, geometry, {
+      const box = createInitialBoxFromAsset(asset, props.roomAnchor, resolvedFloorY(), geometry.localBounds, geometry.localYaw)
+      return {
+        group: buildAssetPointCloudGroup(asset, geometry, {
         color: 0xc084fc,
         pointSize: 0.022,
         maxPoints: 3200,
-      })
+        }),
+        proxy: {
+          assetId: asset.id,
+          box,
+          localBounds: geometry.localBounds,
+          localPoints: samplePointCloud(geometry.localPoints, 2000),
+        } satisfies AssetCollisionProxy,
+      }
     }),
   )
 
@@ -314,11 +440,14 @@ async function rebuildMarkers() {
   }
 
   markerGroup.clear()
-  for (const group of groups) {
-    if (group) {
-      markerGroup.add(group)
+  assetCollisionProxies = []
+  for (const result of results) {
+    if (result) {
+      markerGroup.add(result.group)
+      assetCollisionProxies.push(result.proxy)
     }
   }
+  emitSceneEnvironment()
 }
 
 function disposeMaterial(material: THREE.Material | THREE.Material[]) {
@@ -502,9 +631,9 @@ function updateBoxOverlay() {
   const fill = new THREE.Mesh(
     new THREE.BoxGeometry(1, 1, 1),
     new THREE.MeshStandardMaterial({
-      color: 0xfbbf24,
+      color: props.hasGeometryCollision ? 0xef4444 : 0xfbbf24,
       transparent: true,
-      opacity: 0.16,
+      opacity: props.hasGeometryCollision ? 0.22 : 0.16,
       depthWrite: false,
       roughness: 0.6,
       metalness: 0.04,
@@ -513,7 +642,7 @@ function updateBoxOverlay() {
   const edges = new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
     new THREE.LineBasicMaterial({
-      color: 0xfcd34d,
+      color: props.hasGeometryCollision ? 0xef4444 : 0xfcd34d,
       transparent: true,
       opacity: 0.94,
     }),
@@ -552,6 +681,8 @@ async function loadMeshes() {
   scene.add(layoutGroup)
   scene.add(rawGroup)
   refreshRoomFloorY()
+  refreshSupportSurfacePoints()
+  emitSceneEnvironment()
   updateMeshVisibility()
   await rebuildMarkers()
   await loadSelectedAssetGeometry()
@@ -694,6 +825,13 @@ watch(
     updateBoxOverlay()
   },
   { deep: true },
+)
+
+watch(
+  () => props.hasGeometryCollision,
+  () => {
+    updateBoxOverlay()
+  },
 )
 </script>
 

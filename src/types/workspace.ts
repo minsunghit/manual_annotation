@@ -53,6 +53,13 @@ export interface Box3D {
 }
 
 export type ProjectionView = 'top' | 'front' | 'side'
+export type Box3DHandle = 'move' | 'rotate' | 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
+
+export interface Box3DUpdatePayload {
+  box: Box3D
+  view: ProjectionView
+  handle: Box3DHandle
+}
 
 export interface AssetCollisionProxy {
   assetId: string

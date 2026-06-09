@@ -6,7 +6,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { createBoxDragState, type BoxHandle, updateBox3DFromDrag } from '../composables/useBox3DTransform'
 import { createPointCloudObject, applyBoxTransformToGroup, type LocalBounds } from '../utils/assetBoxTransform'
 import { inverseRotateXZ, rotateXZ } from '../utils/box3dMath'
-import type { Box3D, ProjectionView, Vec2, Vec3 } from '../types/workspace'
+import type { Box3D, Box3DUpdatePayload, ProjectionView, Vec2, Vec3 } from '../types/workspace'
 
 const props = defineProps<{
   box: Box3D | null
@@ -23,7 +23,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'update:box': [box: Box3D]
+  'update:box': [payload: Box3DUpdatePayload]
 }>()
 
 const viewportRef = ref<HTMLDivElement | null>(null)
@@ -585,7 +585,11 @@ function onPointerDown(event: PointerEvent, handle: BoxHandle) {
 
 function onPointerMove(event: PointerEvent) {
   if (dragState && activePointerId === event.pointerId) {
-    emit('update:box', updateBox3DFromDrag(dragState, screenToPlane(event.clientX, event.clientY, dragContext || undefined)))
+    emit('update:box', {
+      box: updateBox3DFromDrag(dragState, screenToPlane(event.clientX, event.clientY, dragContext || undefined)),
+      view: props.view,
+      handle: dragState.handle,
+    })
     return
   }
 

@@ -1,8 +1,9 @@
-import type { AssetCollisionProxy, Box3D, SceneSnapEnvironment, Vec3 } from '../types/workspace'
+import type { AssetCollisionProxy, Box3D, Box3DUpdatePayload, SceneSnapEnvironment, Vec3 } from '../types/workspace'
 import type { LocalBounds } from './assetBoxTransform'
 import { getBox3DCorners, inverseRotateXZ, rotateXZ } from './box3dMath'
 
-const SNAP_DISTANCE = 0.05
+const SNAP_DISTANCE = 0.08
+const OBJECT_SNAP_DISTANCE = 0.16
 const YAW_SNAP_RADIANS = (5 * Math.PI) / 180
 const COLLISION_DISTANCE = 0.02
 const MAX_COLLISION_POINTS = 2000
@@ -87,6 +88,17 @@ function snapScalar(value: number, references: number[], threshold: number): num
   return bestValue
 }
 
+function getSnapDelta(value: number, references: number[], threshold: number): { delta: number; distance: number } | null {
+  let best: { delta: number; distance: number } | null = null
+  for (const reference of references) {
+    const distance = Math.abs(reference - value)
+    if (distance <= threshold && (!best || distance < best.distance)) {
+      best = { delta: reference - value, distance }
+    }
+  }
+  return best
+}
+
 function snapYaw(yaw: number, wallYaws: number[]): number {
   const references = [0, Math.PI * 0.5, Math.PI, -Math.PI * 0.5, ...wallYaws]
   let bestYaw = yaw
@@ -121,7 +133,7 @@ function getBottomProbePoints(box: Box3D): Vec3[] {
 function findSupportY(box: Box3D, environment: SceneSnapEnvironment): number | null {
   const probes = getBottomProbePoints(box)
   let bestY: number | null = null
-  let bestDistanceSq = Number.POSITIVE_INFINITY
+  let bestDistance = SNAP_DISTANCE
   const radiusSq = 0.12 * 0.12
 
   for (const probe of probes) {
@@ -129,49 +141,86 @@ function findSupportY(box: Box3D, environment: SceneSnapEnvironment): number | n
       const dx = support[0] - probe[0]
       const dz = support[2] - probe[2]
       const distanceSq = dx * dx + dz * dz
-      if (distanceSq > radiusSq || distanceSq >= bestDistanceSq) {
+      if (distanceSq > radiusSq) {
         continue
       }
       if (support[1] > probe[1] + box.size[1]) {
         continue
       }
-      bestDistanceSq = distanceSq
-      bestY = support[1]
+
+      const verticalDistance = Math.abs(probe[1] - support[1])
+      if (verticalDistance < bestDistance) {
+        bestDistance = verticalDistance
+        bestY = support[1]
+      }
     }
   }
 
-  return bestY ?? environment.floorY
-}
-
-export function applySnap(
-  box: Box3D,
-  previousBox: Box3D | null,
-  environment: SceneSnapEnvironment | null,
-  localBounds: LocalBounds | null,
-): Box3D {
-  if (!environment) {
-    return cloneBox(box)
+  const bottomY = box.center[1] - box.size[1] * 0.5
+  if (typeof environment.floorY === 'number' && Math.abs(bottomY - environment.floorY) < bestDistance) {
+    bestY = environment.floorY
   }
 
+  return bestY
+}
+
+function getTransformedAssetBounds(asset: AssetCollisionProxy) {
+  if (asset.localPoints.length === 0) {
+    return getFootprintEdges(asset.box)
+  }
+
+  const points = getWorldPoints(asset.localPoints, asset.box, asset.localBounds)
+  return getPointCloudBounds(points)
+}
+
+function snapVerticalIfClose(box: Box3D, environment: SceneSnapEnvironment): Box3D {
   const nextBox = cloneBox(box)
   const supportY = findSupportY(nextBox, environment)
   if (typeof supportY === 'number') {
     nextBox.center[1] = supportY + nextBox.size[1] * 0.5
+    return nextBox
   }
 
-  nextBox.yaw = snapYaw(nextBox.yaw, environment.wallYaws)
+  if (typeof environment.ceilingY === 'number') {
+    const topY = nextBox.center[1] + nextBox.size[1] * 0.5
+    if (Math.abs(topY - environment.ceilingY) <= SNAP_DISTANCE) {
+      nextBox.center[1] = environment.ceilingY - nextBox.size[1] * 0.5
+    }
+  }
 
+  const bottomY = nextBox.center[1] - nextBox.size[1] * 0.5
+  const topY = nextBox.center[1] + nextBox.size[1] * 0.5
+  const objectReferences: number[] = []
+  for (const asset of environment.assets) {
+    const bounds = getTransformedAssetBounds(asset)
+    objectReferences.push(bounds.minY, bounds.maxY)
+  }
+
+  const bottomSnap = getSnapDelta(bottomY, objectReferences, OBJECT_SNAP_DISTANCE)
+  const topSnap = getSnapDelta(topY, objectReferences, OBJECT_SNAP_DISTANCE)
+  if (bottomSnap && (!topSnap || bottomSnap.distance <= topSnap.distance)) {
+    nextBox.center[1] += bottomSnap.delta
+  } else if (topSnap) {
+    nextBox.center[1] += topSnap.delta
+  }
+
+  return nextBox
+}
+
+function snapAxisAlignedFootprint(box: Box3D, environment: SceneSnapEnvironment, localBounds: LocalBounds | null): Box3D {
+  const nextBox = cloneBox(box)
   const referencesX: number[] = []
   const referencesZ: number[] = []
-  for (const wall of environment.wallSurfaces) {
-    referencesX.push(wall.point[0])
-    referencesZ.push(wall.point[2])
+
+  if (environment.roomBounds) {
+    referencesX.push(environment.roomBounds.minX, environment.roomBounds.maxX)
+    referencesZ.push(environment.roomBounds.minZ, environment.roomBounds.maxZ)
   }
 
   for (const asset of environment.assets) {
-    const edges = getFootprintEdges(asset.box)
-    referencesX.push(edges.minX, edges.maxX)
-    referencesZ.push(edges.minZ, edges.maxZ)
+    const bounds = getTransformedAssetBounds(asset)
+    referencesX.push(bounds.minX, bounds.maxX)
+    referencesZ.push(bounds.minZ, bounds.maxZ)
   }
 
   if (localBounds) {
@@ -181,24 +230,158 @@ export function applySnap(
   }
 
   const edges = getFootprintEdges(nextBox)
-  const snappedMinX = snapScalar(edges.minX, referencesX, SNAP_DISTANCE)
-  const snappedMaxX = snapScalar(edges.maxX, referencesX, SNAP_DISTANCE)
-  const snappedMinZ = snapScalar(edges.minZ, referencesZ, SNAP_DISTANCE)
-  const snappedMaxZ = snapScalar(edges.maxZ, referencesZ, SNAP_DISTANCE)
-
-  if (Math.abs(snappedMinX - edges.minX) < Math.abs(snappedMaxX - edges.maxX) && snappedMinX !== edges.minX) {
-    nextBox.center[0] += snappedMinX - edges.minX
-  } else if (snappedMaxX !== edges.maxX) {
-    nextBox.center[0] += snappedMaxX - edges.maxX
+  const candidates: Array<{ axis: 0 | 2; delta: number; distance: number }> = []
+  for (const [, value] of [
+    ['minX', edges.minX],
+    ['maxX', edges.maxX],
+  ] as const) {
+    const snapped = snapScalar(value, referencesX, OBJECT_SNAP_DISTANCE)
+    if (snapped !== value) {
+      candidates.push({ axis: 0, delta: snapped - value, distance: Math.abs(snapped - value) })
+    }
+  }
+  for (const [, value] of [
+    ['minZ', edges.minZ],
+    ['maxZ', edges.maxZ],
+  ] as const) {
+    const snapped = snapScalar(value, referencesZ, OBJECT_SNAP_DISTANCE)
+    if (snapped !== value) {
+      candidates.push({ axis: 2, delta: snapped - value, distance: Math.abs(snapped - value) })
+    }
   }
 
-  if (Math.abs(snappedMinZ - edges.minZ) < Math.abs(snappedMaxZ - edges.maxZ) && snappedMinZ !== edges.minZ) {
-    nextBox.center[2] += snappedMinZ - edges.minZ
-  } else if (snappedMaxZ !== edges.maxZ) {
-    nextBox.center[2] += snappedMaxZ - edges.maxZ
+  candidates.sort((left, right) => left.distance - right.distance)
+  const usedAxes = new Set<0 | 2>()
+  for (const candidate of candidates) {
+    if (usedAxes.has(candidate.axis)) {
+      continue
+    }
+    nextBox.center[candidate.axis] += candidate.delta
+    usedAxes.add(candidate.axis)
   }
 
-  return previousBox ? nextBox : cloneBox(nextBox)
+  return nextBox
+}
+
+function snapObjectFaceIfClose(box: Box3D, environment: SceneSnapEnvironment): Box3D {
+  const nextBox = cloneBox(box)
+  const edges = getFootprintEdges(nextBox)
+  const candidates: Array<{ axis: 0 | 2; delta: number; distance: number }> = []
+
+  for (const asset of environment.assets) {
+    const bounds = getTransformedAssetBounds(asset)
+    const xPairs: Array<[number, number]> = [
+      [edges.minX, bounds.maxX],
+      [edges.maxX, bounds.minX],
+      [edges.minX, bounds.minX],
+      [edges.maxX, bounds.maxX],
+    ]
+    const zPairs: Array<[number, number]> = [
+      [edges.minZ, bounds.maxZ],
+      [edges.maxZ, bounds.minZ],
+      [edges.minZ, bounds.minZ],
+      [edges.maxZ, bounds.maxZ],
+    ]
+
+    for (const [edge, reference] of xPairs) {
+      const distance = Math.abs(reference - edge)
+      if (distance <= OBJECT_SNAP_DISTANCE) {
+        candidates.push({ axis: 0, delta: reference - edge, distance })
+      }
+    }
+    for (const [edge, reference] of zPairs) {
+      const distance = Math.abs(reference - edge)
+      if (distance <= OBJECT_SNAP_DISTANCE) {
+        candidates.push({ axis: 2, delta: reference - edge, distance })
+      }
+    }
+  }
+
+  candidates.sort((left, right) => left.distance - right.distance)
+  const usedAxes = new Set<0 | 2>()
+  for (const candidate of candidates) {
+    if (usedAxes.has(candidate.axis)) {
+      continue
+    }
+    nextBox.center[candidate.axis] += candidate.delta
+    usedAxes.add(candidate.axis)
+  }
+
+  return nextBox
+}
+
+function snapToWallPlaneIfClose(box: Box3D, environment: SceneSnapEnvironment): Box3D {
+  const nextBox = cloneBox(box)
+  const footprint = getBox3DCorners(nextBox).filter((point) => point[1] < nextBox.center[1])
+  let best: { deltaX: number; deltaZ: number; distance: number } | null = null
+
+  for (const wall of environment.wallSurfaces) {
+    for (const point of footprint) {
+      if (point[1] < wall.minY - SNAP_DISTANCE || point[1] > wall.maxY + SNAP_DISTANCE) {
+        continue
+      }
+
+      const tangentValue = point[0] * wall.tangent[0] + point[1] * wall.tangent[1] + point[2] * wall.tangent[2]
+      if (tangentValue < wall.minT - SNAP_DISTANCE || tangentValue > wall.maxT + SNAP_DISTANCE) {
+        continue
+      }
+
+      const signedDistance =
+        (point[0] - wall.point[0]) * wall.normal[0] + (point[2] - wall.point[2]) * wall.normal[2]
+      const distance = Math.abs(signedDistance)
+      if (distance > SNAP_DISTANCE || (best && distance >= best.distance)) {
+        continue
+      }
+
+      best = {
+        deltaX: -signedDistance * wall.normal[0],
+        deltaZ: -signedDistance * wall.normal[2],
+        distance,
+      }
+    }
+  }
+
+  if (best) {
+    nextBox.center[0] += best.deltaX
+    nextBox.center[2] += best.deltaZ
+  }
+
+  return nextBox
+}
+
+export function applySnap(
+  box: Box3D,
+  previousBox: Box3D | null,
+  environment: SceneSnapEnvironment | null,
+  localBounds: LocalBounds | null,
+  context: Pick<Box3DUpdatePayload, 'view' | 'handle'> | null = null,
+): Box3D {
+  if (!environment) {
+    return cloneBox(box)
+  }
+
+  const nextBox = cloneBox(box)
+  const handle = context?.handle
+  const view = context?.view
+  const shouldSnapYaw = !handle || handle === 'rotate'
+  const shouldSnapHorizontal = !handle || view === 'top' || handle === 'move' || ['e', 'w', 'ne', 'nw', 'se', 'sw'].includes(handle)
+  const shouldSnapVertical = !handle || view === 'front' || view === 'side'
+
+  if (shouldSnapYaw) {
+    nextBox.yaw = snapYaw(nextBox.yaw, environment.wallYaws)
+  }
+
+  let snappedBox = nextBox
+  if (shouldSnapHorizontal) {
+    snappedBox = snapAxisAlignedFootprint(snappedBox, environment, localBounds)
+    snappedBox = snapObjectFaceIfClose(snappedBox, environment)
+    snappedBox = snapToWallPlaneIfClose(snappedBox, environment)
+  }
+  if (shouldSnapVertical) {
+    snappedBox = snapVerticalIfClose(snappedBox, environment)
+  }
+
+  return previousBox ? snappedBox : cloneBox(snappedBox)
 }
 
 function transformPointToWorld(point: Vec3, box: Box3D, localBounds: LocalBounds): Vec3 {

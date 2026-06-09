@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import OrthographicBoxEditor from './OrthographicBoxEditor.vue'
-import type { Box3D, ProjectionView, Vec3 } from '../types/workspace'
+import type { Box3D, Box3DUpdatePayload, ProjectionView, Vec3 } from '../types/workspace'
 import type { LocalBounds } from '../utils/assetBoxTransform'
 
 const props = defineProps<{
@@ -15,7 +15,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'update:box': [box: Box3D]
+  'update:box': [payload: Box3DUpdatePayload]
   'update:ortho-zoom': [zoom: number]
 }>()
 

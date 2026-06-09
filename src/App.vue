@@ -15,6 +15,7 @@ import type {
   AssetGeometryPayload,
   AssetPose,
   Box3D,
+  Box3DUpdatePayload,
   RoomAnchor,
   SceneOption,
   SceneSnapEnvironment,
@@ -245,9 +246,11 @@ function refreshCollisionStatus(box: Box3D | null = box3d.value) {
   assistMessage.value = collision.collision ? 'Geometry collision detected' : ''
 }
 
-function updateBoxWithAssist(nextBox: Box3D) {
+function updateBoxWithAssist(payload: Box3DUpdatePayload | Box3D) {
+  const nextBox = 'box' in payload ? payload.box : payload
+  const context = 'box' in payload ? { view: payload.view, handle: payload.handle } : null
   const snappedBox = snapEnabled.value
-    ? applySnap(nextBox, box3d.value, sceneEnvironment.value, assetLocalBounds.value)
+    ? applySnap(nextBox, box3d.value, sceneEnvironment.value, assetLocalBounds.value, context)
     : nextBox
   const assisted = applyCollisionAvoidance(
     snappedBox,
